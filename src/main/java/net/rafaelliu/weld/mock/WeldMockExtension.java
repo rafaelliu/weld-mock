@@ -15,6 +15,9 @@
  */
 package net.rafaelliu.weld.mock;
 
+import java.lang.reflect.ParameterizedType;
+import java.lang.reflect.Type;
+
 import javax.enterprise.context.spi.CreationalContext;
 import javax.enterprise.event.Observes;
 import javax.enterprise.inject.spi.Extension;
@@ -32,10 +35,11 @@ import net.rafaelliu.weld.mock.wrapper.WrappedProducer;
 import org.mockito.Mockito;
 
 public class WeldMockExtension implements Extension {
-	
-	private MockContext mockContext = MockContext.getInstance(); 
 
-	public <T> void processInjectionTarget(@Observes final ProcessInjectionTarget<T> pit) {
+	private MockContext mockContext = MockContext.getInstance();
+
+	public <T> void processInjectionTarget(
+			@Observes final ProcessInjectionTarget<T> pit) {
 		final InjectionTarget<T> it = pit.getInjectionTarget();
 
 		InjectionTarget<T> wrapped = new WrappedInjectionTarget<T>(it) {
@@ -49,22 +53,32 @@ public class WeldMockExtension implements Extension {
 		pit.setInjectionTarget(wrapped);
 	}
 
-	public <T, X> void processProcessProducer(@Observes final ProcessProducer<T, X> pp) {
+	public <T, X> void processProcessProducer(
+			@Observes final ProcessProducer<T, X> pp) {
 		final Producer<X> producer = pp.getProducer();
 
 		Producer<X> wrapped = new WrappedProducer<X>(producer) {
 			@Override
 			@SuppressWarnings("unchecked")
 			public X produce(CreationalContext<X> ctx) {
-				Class<X> baseType = (Class<X>) pp.getAnnotatedMember().getBaseType();
-				X testDouble = getTestDouble(baseType, producer, ctx);
+				Type baseType = pp.getAnnotatedMember().getBaseType();
+				Class<X> baseClazz = null;
+				if (baseType instanceof ParameterizedType) {
+					baseClazz = (Class<X>) ((ParameterizedType) baseType).getRawType();
+				} else {
+					baseClazz = (Class<X>) baseType;
+				}
+
+				X testDouble = getTestDouble(baseClazz, producer, ctx);
+
 				return testDouble != null ? testDouble : producer.produce(ctx);
 			}
 		};
 		pp.setProducer(wrapped);
 	}
-	
-	private <T> T getTestDouble(Class<T> clazz, Producer<T> producer, CreationalContext<T> ctx) {
+
+	private <T> T getTestDouble(Class<T> clazz, Producer<T> producer,
+			CreationalContext<T> ctx) {
 		T mock = null;
 		if (mockContext.getType(clazz) == DoubleType.MOCK) {
 			mock = Mockito.mock(clazz);
@@ -74,7 +88,7 @@ public class WeldMockExtension implements Extension {
 			mock = Mockito.spy(obj);
 			System.out.println("Spying " + clazz);
 		}
-		
+
 		Expectations<T> expectations = mockContext.getExpectations(clazz);
 		if (expectations != null) {
 			expectations.defineExpectations(mock);
